@@ -4,6 +4,7 @@ using Propulse.Core.Entities;
 using Propulse.Core.Interfaces;
 using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
+using System.Text;
 
 namespace Propulse.Infrastructure.Services;
 
@@ -13,20 +14,22 @@ public class OpenAiService : IAiService
     private readonly ILogger<OpenAiService> _logger;
 
     private const string SystemPrompt = """
-        You are Propulse, a friendly and professional AI sales assistant for a real estate company.
-        
-        Your role:
-        - Help customers find properties (apartments, villas, offices, land)
-        - Ask clarifying questions: budget, preferred location, size, number of rooms, buy vs rent
-        - Provide helpful guidance through the buying/renting process
-        - Be warm, natural, and conversational — like a knowledgeable friend, not a robot
-        
-        Rules:
-        - ALWAYS reply in the SAME LANGUAGE the customer is using (Arabic, English, etc.)
-        - Keep responses concise (2-4 sentences max) — this is WhatsApp, not email
-        - Never make up property listings or prices
-        - If you don't know something, say you'll check and get back to them
-        - Use the conversation history to maintain context — don't re-ask questions already answered
+        You are Propulse, an AI sales assistant for a real estate company.
+        You help customers find properties by searching ONLY from the data provided to you.
+
+        CRITICAL RULES:
+        - You will receive a section called [AVAILABLE DATA FROM DATABASE].
+          This contains real messages/listings from the company's database.
+        - If the database has matching properties → present them immediately in a friendly, humanized way.
+          Summarize the key info (location, size, price, rooms) clearly.
+        - If the database has NO matching results → be HONEST. Say something like:
+          "للأسف مش لاقي حاجة مطابقة دلوقتي" or "Sorry, I couldn't find a match right now"
+          Then ask if they'd like to adjust their criteria or leave their details so a sales agent can follow up.
+        - NEVER invent or fabricate property listings, prices, or details.
+        - ALWAYS reply in the SAME LANGUAGE the customer is using (Arabic, English, Franco-Arab, etc.)
+        - Keep responses concise and natural — this is WhatsApp, not a formal email.
+        - Use conversation history to maintain context — don't re-ask what was already answered.
+        - Be warm and helpful like a knowledgeable friend, not a robot.
         """;
 
     public OpenAiService(IConfiguration configuration, ILogger<OpenAiService> logger)
@@ -47,15 +50,15 @@ public class OpenAiService : IAiService
         }
     }
 
-    public async Task<string> GenerateReplyAsync(string currentMessage, List<WhatsAppMessage> conversationHistory)
+    public async Task<string> GenerateReplyAsync(
+        string currentMessage,
+        List<WhatsAppMessage> conversationHistory,
+        List<WhatsAppMessage> relevantData)
     {
         if (_chatClient == null)
             return $"Propulse (Beta): {currentMessage}";
 
-        var messages = new List<ChatMessage>
-        {
-            new SystemChatMessage(SystemPrompt)
-        };
+        var messages = new List<ChatMessage> { new SystemChatMessage(SystemPrompt) };
 
         foreach (var msg in conversationHistory)
         {
@@ -64,13 +67,22 @@ public class OpenAiService : IAiService
                 messages.Add(new AssistantChatMessage(msg.BotReply));
         }
 
-        messages.Add(new UserChatMessage(currentMessage));
+        var dataContext = BuildDataContext(relevantData);
+        var userMessageWithData = $"""
+            [CUSTOMER MESSAGE]
+            {currentMessage}
+
+            [AVAILABLE DATA FROM DATABASE]
+            {dataContext}
+            """;
+
+        messages.Add(new UserChatMessage(userMessageWithData));
 
         try
         {
             var completion = await _chatClient.CompleteChatAsync(messages);
             var reply = completion.Value.Content[0].Text;
-            _logger.LogInformation("AI generated reply for message");
+            _logger.LogInformation("AI generated reply ({Results} DB results used)", relevantData.Count);
             return reply;
         }
         catch (Exception ex)
@@ -78,5 +90,24 @@ public class OpenAiService : IAiService
             _logger.LogError(ex, "OpenAI API call failed");
             return $"Propulse (Beta): {currentMessage}";
         }
+    }
+
+    private static string BuildDataContext(List<WhatsAppMessage> relevantData)
+    {
+        if (relevantData.Count == 0)
+            return "No matching results found in the database.";
+
+        var sb = new StringBuilder();
+        sb.AppendLine($"Found {relevantData.Count} potentially relevant message(s):");
+        sb.AppendLine();
+
+        foreach (var msg in relevantData)
+        {
+            sb.AppendLine($"- From: {msg.SenderName} | Date: {msg.CreatedAt:yyyy-MM-dd}");
+            sb.AppendLine($"  Content: {msg.Content}");
+            sb.AppendLine();
+        }
+
+        return sb.ToString();
     }
 }

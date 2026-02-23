@@ -59,7 +59,9 @@ public class WhatsAppController : ControllerBase
                     .ToListAsync();
                 history.Reverse();
 
-                var aiReply = await _aiService.GenerateReplyAsync(newMessage.Content, history);
+                var relevantData = await SearchDatabaseAsync(newMessage.Content, newMessage.Id);
+
+                var aiReply = await _aiService.GenerateReplyAsync(newMessage.Content, history, relevantData);
 
                 newMessage.BotReply = aiReply;
                 newMessage.IsProcessed = true;
@@ -74,6 +76,40 @@ public class WhatsAppController : ControllerBase
         }
 
         return Content("<Response/>", "text/xml");
+    }
+
+    private async Task<List<WhatsAppMessage>> SearchDatabaseAsync(string query, int excludeId)
+    {
+        var keywords = query
+            .Split(' ', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries)
+            .Where(w => w.Length >= 2)
+            .Distinct()
+            .ToList();
+
+        if (keywords.Count == 0)
+            return new List<WhatsAppMessage>();
+
+        var allMessages = await _context.WhatsAppMessages
+            .Where(m => m.Id != excludeId)
+            .OrderByDescending(m => m.CreatedAt)
+            .Take(500)
+            .ToListAsync();
+
+        var scored = allMessages
+            .Select(m => new
+            {
+                Message = m,
+                Score = keywords.Count(k =>
+                    m.Content.Contains(k, StringComparison.OrdinalIgnoreCase))
+            })
+            .Where(x => x.Score > 0)
+            .OrderByDescending(x => x.Score)
+            .ThenByDescending(x => x.Message.CreatedAt)
+            .Take(15)
+            .Select(x => x.Message)
+            .ToList();
+
+        return scored;
     }
 
     [HttpGet("messages")]

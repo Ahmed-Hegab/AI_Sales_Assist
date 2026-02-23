@@ -4,5 +4,8 @@ namespace Propulse.Core.Interfaces;
 
 public interface IAiService
 {
-    Task<string> GenerateReplyAsync(string currentMessage, List<WhatsAppMessage> conversationHistory);
+    Task<string> GenerateReplyAsync(
+        string currentMessage,
+        List<WhatsAppMessage> conversationHistory,
+        List<WhatsAppMessage> relevantData);
 }
