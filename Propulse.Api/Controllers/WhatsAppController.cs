@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Mvc;
+using Microsoft.EntityFrameworkCore;
 using Propulse.Core.Entities;
 using Propulse.Core.Interfaces;
 using Propulse.Infrastructure.Data;
@@ -72,6 +73,31 @@ public class WhatsAppController : ControllerBase
         }
         
         return Ok("Message Received and Saved");
+    }
+
+    [HttpGet("messages")]
+    public async Task<IActionResult> GetMessages([FromQuery] int page = 1, [FromQuery] int pageSize = 20)
+    {
+        var total = _context.WhatsAppMessages.Count();
+        var messages = await _context.WhatsAppMessages
+            .OrderByDescending(m => m.CreatedAt)
+            .Skip((page - 1) * pageSize)
+            .Take(pageSize)
+            .Select(m => new
+            {
+                m.Id,
+                m.SenderPhoneNumber,
+                m.SenderName,
+                m.Content,
+                m.MessageType,
+                m.IsProcessed,
+                m.IsOffer,
+                m.StructuredDataJson,
+                m.CreatedAt
+            })
+            .ToListAsync();
+
+        return Ok(new { total, page, pageSize, messages });
     }
 
     [HttpGet("test")]
