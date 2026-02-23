@@ -1,7 +1,8 @@
+using Propulse.Core.Entities;
+
 namespace Propulse.Core.Interfaces;
 
 public interface IAiService
 {
-    Task<string> ParseMessageAsync(string messageContent);
-    // Future: Task<string> GenerateReplyAsync(...);
+    Task<string> GenerateReplyAsync(string currentMessage, List<WhatsAppMessage> conversationHistory);
 }

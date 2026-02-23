@@ -31,15 +31,14 @@ public class WhatsAppController : ControllerBase
     [HttpPost("webhook")]
     public async Task<IActionResult> ReceiveMessage([FromForm] WhatsAppMessageDto message)
     {
-        _logger.LogInformation($"Received message from {message.From}: {message.Body}");
+        _logger.LogInformation("Received message from {From}: {Body}", message.From, message.Body);
 
-        // 1. Save to Database
         var newMessage = new WhatsAppMessage
         {
             SenderPhoneNumber = message.From ?? "Unknown",
-            SenderName = message.ProfileName ?? "Unknown", 
+            SenderName = message.ProfileName ?? "Unknown",
             Content = message.Body ?? "",
-            GroupId = "", 
+            GroupId = "",
             MessageType = message.NumMedia != "0" ? "media" : "text",
             CreatedAt = DateTime.UtcNow
         };
@@ -47,32 +46,33 @@ public class WhatsAppController : ControllerBase
         _context.WhatsAppMessages.Add(newMessage);
         await _context.SaveChangesAsync();
 
-        _logger.LogInformation($"Message saved efficiently with ID: {newMessage.Id}");
-        
-        // 2. AI Processing (Currently Disabled/Mocked)
-        if (!string.IsNullOrEmpty(newMessage.Content))
+        if (!string.IsNullOrEmpty(newMessage.Content)
+            && !string.IsNullOrEmpty(newMessage.SenderPhoneNumber)
+            && !newMessage.SenderPhoneNumber.Contains("g.us"))
         {
-            try 
+            try
             {
-               var aiResponse = await _aiService.ParseMessageAsync(newMessage.Content);
-               newMessage.StructuredDataJson = aiResponse;
-               
-               newMessage.IsProcessed = true; // Mark as processed even if AI is dummy
-               await _context.SaveChangesAsync();
-               
-               // Simple Echo Reply (Since AI is off)
-               if (!string.IsNullOrEmpty(newMessage.SenderPhoneNumber) && !newMessage.SenderPhoneNumber.Contains("g.us"))
-               {
-                    await _whatsAppService.SendMessageAsync(newMessage.SenderPhoneNumber, $"Propulse (Beta) Saved: {newMessage.Content}");
-               }
+                var history = await _context.WhatsAppMessages
+                    .Where(m => m.SenderPhoneNumber == newMessage.SenderPhoneNumber && m.Id != newMessage.Id)
+                    .OrderBy(m => m.CreatedAt)
+                    .TakeLast(20)
+                    .ToListAsync();
+
+                var aiReply = await _aiService.GenerateReplyAsync(newMessage.Content, history);
+
+                newMessage.BotReply = aiReply;
+                newMessage.IsProcessed = true;
+                await _context.SaveChangesAsync();
+
+                await _whatsAppService.SendMessageAsync(newMessage.SenderPhoneNumber, aiReply);
             }
-            catch(Exception ex)
+            catch (Exception ex)
             {
-                _logger.LogError(ex, "Processing failed");
+                _logger.LogError(ex, "AI processing or reply failed");
             }
         }
-        
-        return Ok("Message Received and Saved");
+
+        return Ok("Message Received and Processed");
     }
 
     [HttpGet("messages")]
@@ -89,10 +89,10 @@ public class WhatsAppController : ControllerBase
                 m.SenderPhoneNumber,
                 m.SenderName,
                 m.Content,
+                m.BotReply,
                 m.MessageType,
                 m.IsProcessed,
                 m.IsOffer,
-                m.StructuredDataJson,
                 m.CreatedAt
             })
             .ToListAsync();
