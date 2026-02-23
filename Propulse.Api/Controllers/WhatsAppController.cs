@@ -54,9 +54,10 @@ public class WhatsAppController : ControllerBase
             {
                 var history = await _context.WhatsAppMessages
                     .Where(m => m.SenderPhoneNumber == newMessage.SenderPhoneNumber && m.Id != newMessage.Id)
-                    .OrderBy(m => m.CreatedAt)
-                    .TakeLast(20)
+                    .OrderByDescending(m => m.CreatedAt)
+                    .Take(20)
                     .ToListAsync();
+                history.Reverse();
 
                 var aiReply = await _aiService.GenerateReplyAsync(newMessage.Content, history);
 
@@ -72,7 +73,7 @@ public class WhatsAppController : ControllerBase
             }
         }
 
-        return Ok("Message Received and Processed");
+        return Content("<Response/>", "text/xml");
     }
 
     [HttpGet("messages")]
